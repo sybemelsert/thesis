@@ -2,5 +2,5 @@
 *.avi
 *.AVI
 *.pt
-testing/
-sam3.py
+test.py
+sam3old.py

@@ -180,10 +180,11 @@ def process_single_pair(video_path, txt_path, output_dir, configurations):
 
 ### AUTOMATICALLY MATCH .avi AND .txt FILES IN A DIRECTORY AND PROCESS THEM
 
-def run_batch_conversion(target_folder, experiment_configs):
+def run_batch_conversion(current_working_directory, experiment_configs):
     """
     Scans a directory for matching .avi and .txt file pairs and triggers processing.
     """
+    target_folder = os.path.join(current_working_directory, "DR(eye)VE", "original")
     avi_files = glob.glob(os.path.join(target_folder, "*.avi"))
     
     if not avi_files:
@@ -195,15 +196,15 @@ def run_batch_conversion(target_folder, experiment_configs):
     pairs_found = 0
     for video_path in avi_files:
         # Scan for corresponding .txt file by matching base name
-        base_without_ext = os.path.splitext(video_path)[0]
-        expected_txt_path = base_without_ext + ".txt"
+        base_name = os.path.splitext(os.path.basename(video_path))[0]
+        expected_txt_path = os.path.join(current_working_directory, "DR(eye)VE", "txt", base_name + ".txt")
         
         if os.path.exists(expected_txt_path):
             pairs_found += 1
-            print(f"\n[Pair #{pairs_found}] Processing base name: {os.path.basename(base_without_ext)}")
+            print(f"\n[Pair #{pairs_found}] Processing base name: {os.path.basename(base_name)}")
             
             # Select output folder for resulting videos, create one if pathname doesn't exist
-            output_folder = os.path.join(target_folder, "adversarial_outputs")
+            output_folder = os.path.join(current_working_directory, "DR(eye)VE", "modified")
             os.makedirs(output_folder, exist_ok=True)
             
             # Call processing function for matched pair
