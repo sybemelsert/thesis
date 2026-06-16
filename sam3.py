@@ -24,8 +24,7 @@ def initialize_sam3(checkpoint_path="sam3.pt"):
 def parse_gaze_txt_file(txt_path):
     """
     Parses eye-tracking coordinates out of your specific .txt structure.
-    Maps frame sequences (e.g., frame_etg) to absolute (x, y) coordinates.
-    Returns a dictionary: {frame_index: (gaze_x, gaze_y)}
+    Maps frame sequences to absolute (x, y) coordinates.
     """
     gaze_lookup = {}
     if not txt_path or not os.path.exists(txt_path):
@@ -33,29 +32,30 @@ def parse_gaze_txt_file(txt_path):
         
     try:
         with open(txt_path, "r") as f:
-            lines = f.readlines()
+            # Skip the header row
+            next(f, None)
             
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue  
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue  
+                    
+                parts = line.replace("\t", ",").replace(" ", ",").split(",")
+                parts = [p.strip() for p in parts if p.strip()]
                 
-            # Handle comma, space, or tab delimiters
-            parts = line.replace("\t", ",").replace(" ", ",").split(",")
-            parts = [p.strip() for p in parts if p.strip()]
-            
-            if len(parts) >= 3:
-                # Extract digits from frame sequence token (e.g., 'frame_etg_0001' -> 1)
-                frame_str = "".join(filter(str.isdigit, parts[0]))
-                if not frame_str:
-                    continue
-                
-                frame_idx = int(frame_str)
-                gaze_x = float(parts[1])
-                gaze_y = float(parts[2])
-                
-                gaze_lookup[frame_idx] = (gaze_x, gaze_y)
-                
+                if len(parts) >= 4:
+                    try:
+                        # parts[0] is frame_etg, parts[1] is frame_gar
+                        frame_idx = int(float(parts[0]))
+                        
+                        # Fix: X and Y are at index 2 and 3
+                        gaze_x = float(parts[2])
+                        gaze_y = float(parts[3])
+                        
+                        gaze_lookup[frame_idx] = (gaze_x, gaze_y)
+                    except ValueError:
+                        continue
+                        
         return gaze_lookup
     except Exception as e:
         print(f"  Error parsing text coordinate file {txt_path}: {e}")
@@ -107,18 +107,28 @@ def evaluate_frame_with_gaze(frame, predictor, gaze_coords):
 
 def test_single_video(video_path, eye_tracking_lookup, predictor, sample_rate):
     """
-    Iterates over video frames. Benchmarks metrics every 5 frames.
+    Iterates over video frames. Benchmarks SAM metrics every `sample_rate` frames, 
+    but tracks hardware reliability (Track Loss & TTR) continuously on every frame.
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print(f"  Error: Could not open video file {video_path}")
         return None
 
+    # Get video properties for time calculations
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
     frame_idx = 0
     total_frames_sampled = 0
     hit_count = 0
     valid_distances = []
-    frame_times = []
+    
+    # New reliability trackers
+    misses = 0
+    current_loss_streak = 0
+    recovery_times_ms = []
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -126,33 +136,59 @@ def test_single_video(video_path, eye_tracking_lookup, predictor, sample_rate):
             break
 
         gaze_coords = eye_tracking_lookup.get(frame_idx, None) if eye_tracking_lookup else None
+        
+        # --- 1. Reliability Metrics (Calculated continuously on EVERY frame) ---
+        is_valid_gaze = False
+        if gaze_coords is not None:
+            gx, gy = gaze_coords
+            if not (math.isnan(gx) or math.isnan(gy)):
+                # Ensure it is a physically possible coordinate (not a hardware glitch)
+                if (0 <= gx <= width) and (0 <= gy <= height):
+                    is_valid_gaze = True
+                    
+        if not is_valid_gaze:
+            misses += 1
+            current_loss_streak += 1
+        else:
+            # Gaze recovered! Calculate how many milliseconds it was lost
+            if current_loss_streak > 0:
+                ttr_ms = (current_loss_streak / fps) * 1000
+                recovery_times_ms.append(ttr_ms)
+                current_loss_streak = 0
+        
+        # --- 2. SAM Performance Metrics (Calculated ONLY on sample_rate frames) ---
         is_sample_frame = (frame_idx % sample_rate == 0)
-
-        if is_sample_frame and gaze_coords is not None:
-            start_time = time.perf_counter()
+        
+        if is_sample_frame and is_valid_gaze:
             is_hit, distance = evaluate_frame_with_gaze(frame, predictor, gaze_coords)
-            end_time = time.perf_counter()
-
-            if not (math.isnan(gaze_coords[0]) or math.isnan(gaze_coords[1])):
-                total_frames_sampled += 1
-                hit_count += is_hit
-                if distance >= 0:
-                    valid_distances.append(distance)
             
-            frame_times.append((end_time - start_time) * 1000)
+            total_frames_sampled += 1
+            hit_count += is_hit
+            if distance >= 0:
+                valid_distances.append(distance)
             
         frame_idx += 1
 
     cap.release()
+    
+    # Handle edge case if video ends while the tracker is still lost
+    if current_loss_streak > 0:
+        ttr_ms = (current_loss_streak / fps) * 1000
+        recovery_times_ms.append(ttr_ms)
 
+    # Compile final metrics
+    actual_total_frames = frame_idx 
     hit_rate = (hit_count / total_frames_sampled * 100) if total_frames_sampled > 0 else 0.0
     avg_drift = np.mean(valid_distances) if valid_distances else -1.0
-    avg_latency = sum(frame_times) / len(frame_times) if frame_times else 0.0
+    
+    track_loss_pct = (misses / actual_total_frames * 100) if actual_total_frames > 0 else 0.0
+    max_ttr = np.max(recovery_times_ms) if recovery_times_ms else 0.0
 
     return {
         "hit_rate": round(hit_rate, 2),
         "avg_drift_pixels": round(avg_drift, 2),
-        "avg_latency_ms": round(avg_latency, 2)
+        "track_loss_pct": round(track_loss_pct, 2),
+        "max_ttr_ms": round(max_ttr, 2)
     }
 
 
@@ -214,7 +250,7 @@ def run_experiment_pipeline(base_thesis_dir, predictor, sample_rate):
         print(f"Error: No videos found. Check directories inside:\n {drive_dir}")
         return
 
-    headers = ["Source_Folder", "Video_Filename", "Gaze_Hit_Rate_Pct", "Avg_Centroid_Drift_Pixels", "Avg_Latency_Ms"]
+    headers = ["Source_Folder", "Video_Filename", "Gaze_Hit_Rate_Pct", "Avg_Centroid_Drift_Pixels", "Track_Loss_Pct", "Max_TTR_Ms"]
     
     print(f"Discovered {len(all_videos)} total videos inside experimental subdirectories.")
     
@@ -241,7 +277,8 @@ def run_experiment_pipeline(base_thesis_dir, predictor, sample_rate):
                     filename,
                     metrics["hit_rate"],
                     metrics["avg_drift_pixels"],
-                    metrics["avg_latency_ms"]
+                    metrics["track_loss_pct"],
+                    metrics["max_ttr_ms"]
                 ])
                 csv_file.flush()
 
@@ -252,7 +289,7 @@ if __name__ == "__main__":
     current_thesis_dir = os.path.dirname(os.path.abspath(__file__))
     model_checkpoint = os.path.join(current_thesis_dir, "sam3.pt")
 
-    SAMPLE_RATE = 30 # Set the sample rate for frame evaluation
+    SAMPLE_RATE = 100 # Set the sample rate for frame evaluation
     
     sam3_predictor = initialize_sam3(checkpoint_path=model_checkpoint)
     run_experiment_pipeline(current_thesis_dir, sam3_predictor, sample_rate=SAMPLE_RATE)
