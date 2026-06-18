@@ -82,7 +82,8 @@ def evaluate_frame_with_gaze(frame, predictor, gaze_coords):
     check_y = min(max(int(gaze_y), 0), frame_h - 1)
 
     # Point prompt interaction layer inside SAM 3
-    results = predictor(frame, points=[[check_x, check_y]], labels=[1], imgsz=644, verbose=False)[0]
+    with torch.autocast(device_type="cuda" if torch.cuda.is_available() else "cpu", dtype=torch.float16):
+        results = predictor(frame, points=[[check_x, check_y]], labels=[1], imgsz=644, verbose=False)[0]
     
     if hasattr(results, 'masks') and results.masks is not None and len(results.masks.data) > 0:
         mask = results.masks.data[0].cpu().numpy().astype(np.uint8)
@@ -131,10 +132,6 @@ def test_single_video(video_path, eye_tracking_lookup, predictor, sample_rate):
     recovery_times_ms = []
 
     while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-
         gaze_coords = eye_tracking_lookup.get(frame_idx, None) if eye_tracking_lookup else None
         
         # --- 1. Reliability Metrics (Calculated continuously on EVERY frame) ---
@@ -142,7 +139,6 @@ def test_single_video(video_path, eye_tracking_lookup, predictor, sample_rate):
         if gaze_coords is not None:
             gx, gy = gaze_coords
             if not (math.isnan(gx) or math.isnan(gy)):
-                # Ensure it is a physically possible coordinate (not a hardware glitch)
                 if (0 <= gx <= width) and (0 <= gy <= height):
                     is_valid_gaze = True
                     
@@ -150,22 +146,32 @@ def test_single_video(video_path, eye_tracking_lookup, predictor, sample_rate):
             misses += 1
             current_loss_streak += 1
         else:
-            # Gaze recovered! Calculate how many milliseconds it was lost
             if current_loss_streak > 0:
                 ttr_ms = (current_loss_streak / fps) * 1000
                 recovery_times_ms.append(ttr_ms)
                 current_loss_streak = 0
         
-        # --- 2. SAM Performance Metrics (Calculated ONLY on sample_rate frames) ---
+        # --- 2. OpenCV Optimization & SAM Performance Metrics ---
         is_sample_frame = (frame_idx % sample_rate == 0)
         
         if is_sample_frame and is_valid_gaze:
+            # We need to evaluate this frame, so fully decode it
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
             is_hit, distance = evaluate_frame_with_gaze(frame, predictor, gaze_coords)
             
             total_frames_sampled += 1
             hit_count += is_hit
             if distance >= 0:
                 valid_distances.append(distance)
+        else:
+            # We do NOT need to evaluate this frame. 
+            # Grab() advances the video pointer instantly without CPU decoding overhead.
+            ret = cap.grab()
+            if not ret:
+                break
             
         frame_idx += 1
 
@@ -178,17 +184,17 @@ def test_single_video(video_path, eye_tracking_lookup, predictor, sample_rate):
 
     # Compile final metrics
     actual_total_frames = frame_idx 
-    hit_rate = (hit_count / total_frames_sampled * 100) if total_frames_sampled > 0 else 0.0
+    hit_rate_perc = (hit_count / total_frames_sampled * 100) if total_frames_sampled > 0 else 0.0
     avg_drift = np.mean(valid_distances) if valid_distances else -1.0
     
-    track_loss_pct = (misses / actual_total_frames * 100) if actual_total_frames > 0 else 0.0
-    max_ttr = np.max(recovery_times_ms) if recovery_times_ms else 0.0
+    track_loss_perc = (misses / actual_total_frames * 100) if actual_total_frames > 0 else 0.0
+    max_ttr_ms = np.max(recovery_times_ms) if recovery_times_ms else 0.0
 
     return {
-        "hit_rate": round(hit_rate, 2),
-        "avg_drift_pixels": round(avg_drift, 2),
-        "track_loss_pct": round(track_loss_pct, 2),
-        "max_ttr_ms": round(max_ttr, 2)
+        "hit_rate_perc": round(hit_rate_perc, 2),
+        "avg_drift_pixl": round(avg_drift, 2),
+        "track_loss_perc": round(track_loss_perc, 2),
+        "max_ttr_ms": round(max_ttr_ms, 2)
     }
 
 
@@ -250,7 +256,7 @@ def run_experiment_pipeline(base_thesis_dir, predictor, sample_rate):
         print(f"Error: No videos found. Check directories inside:\n {drive_dir}")
         return
 
-    headers = ["Source_Folder", "Video_Filename", "Gaze_Hit_Rate_Pct", "Avg_Centroid_Drift_Pixels", "Track_Loss_Pct", "Max_TTR_Ms"]
+    headers = ["type", "filename", "hit_rate_perc", "avg_drift_pixl", "track_loss_perc", "max_ttr_ms"]
     
     print(f"Discovered {len(all_videos)} total videos inside experimental subdirectories.")
     
@@ -275,9 +281,9 @@ def run_experiment_pipeline(base_thesis_dir, predictor, sample_rate):
                 writer.writerow([
                     source_type,
                     filename,
-                    metrics["hit_rate"],
-                    metrics["avg_drift_pixels"],
-                    metrics["track_loss_pct"],
+                    metrics["hit_rate_perc"],
+                    metrics["avg_drift_pixl"],
+                    metrics["track_loss_perc"],
                     metrics["max_ttr_ms"]
                 ])
                 csv_file.flush()
@@ -289,7 +295,7 @@ if __name__ == "__main__":
     current_thesis_dir = os.path.dirname(os.path.abspath(__file__))
     model_checkpoint = os.path.join(current_thesis_dir, "sam3.pt")
 
-    SAMPLE_RATE = 100 # Set the sample rate for frame evaluation
+    SAMPLE_RATE = 20 # Set the sample rate for frame evaluation
     
     sam3_predictor = initialize_sam3(checkpoint_path=model_checkpoint)
     run_experiment_pipeline(current_thesis_dir, sam3_predictor, sample_rate=SAMPLE_RATE)

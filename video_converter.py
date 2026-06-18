@@ -42,6 +42,16 @@ def apply_underexposure(frame, severity:int):
     frame_float = frame.astype(np.float32) - severity
     return np.clip(frame_float, 0, 255).astype(np.uint8)
 
+def apply_grain(frame, severity:float):
+    """
+    Apply grain by adding random noise to the frame, with severity controlling the intensity of the noise.
+    The noise is generated as a normal distribution and added to the original frame, followed by clipping to maintain valid pixel values.
+    """
+    if severity == 0: return frame
+    noise = np.random.normal(0, severity * 255, frame.shape).astype(np.float32)
+    noisy_frame = frame.astype(np.float32) + noise
+    return np.clip(noisy_frame, 0, 255).astype(np.uint8)
+
 def apply_occlusion(frame, x:int, y:int, severity:int):
     """
     Apply occlusion by masking the provided region of the frame with black pixels.
@@ -156,18 +166,10 @@ def process_single_pair(video_path, txt_path, output_dir, configurations):
                     processed = apply_overexposure(frame, severity_val)
                 elif effect_name == "underexposure":
                     processed = apply_underexposure(frame, severity_val)
-                elif effect_name == "occlusion_static":
+                elif effect_name == "grain":
+                    processed = apply_grain(frame, severity_val)
+                elif effect_name == "occlusion":
                     processed = apply_occlusion(frame, static_center_x, static_center_y, severity_val)
-                elif effect_name == "occlusion_dynamic":
-                    if frame_idx in gaze_dict:
-                        gaze_x, gaze_y = gaze_dict[frame_idx]
-                        new_gaze_x = min(width - 1, max(0, int(gaze_x)))
-                        new_gaze_y = min(height - 1, max(0, int(gaze_y)))
-                        last_gaze_x, last_gaze_y = new_gaze_x, new_gaze_y
-                    else:
-                        new_gaze_x, new_gaze_y = last_gaze_x, last_gaze_y
-                        
-                    processed = apply_occlusion(frame, new_gaze_x, new_gaze_y, severity_val)
                 else:
                     processed = frame
                     
@@ -225,7 +227,7 @@ def run_batch_conversion(current_working_directory, experiment_configs):
 if __name__ == "__main__":
     # Get the current working directory of the script to ensure it processes files in the correct location
     current_working_directory = os.path.dirname(os.path.abspath(__file__)) 
-    
+
     experiment_configs = {
         "gaussian_blur": { 
             "mild": 9,
@@ -247,12 +249,12 @@ if __name__ == "__main__":
             "medium": 90,
             "severe": 140
         },
-        "occlusion_static": {
-            "mild": 35,
-            "medium": 80,
-            "severe": 150
+        "grain": {
+            "mild": 0.02,
+            "medium": 0.05,
+            "severe": 0.1
         },
-        "occlusion_dynamic": {
+        "occlusion": {
             "mild": 35,
             "medium": 80,
             "severe": 150
