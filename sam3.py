@@ -193,8 +193,8 @@ def test_single_video(video_path, eye_tracking_lookup, predictor, sample_rate):
     return {
         "hit_rate_perc": round(hit_rate_perc, 2),
         "avg_drift_pixl": round(avg_drift, 2),
-        "track_loss_perc": round(track_loss_perc, 2),
-        "max_ttr_ms": round(max_ttr_ms, 2)
+        "track_loss_perc": round(track_loss_perc, 2), # Control variable
+        "max_ttr_ms": round(max_ttr_ms, 2) # Control
     }
 
 
