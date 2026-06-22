@@ -295,7 +295,7 @@ if __name__ == "__main__":
     current_thesis_dir = os.path.dirname(os.path.abspath(__file__))
     model_checkpoint = os.path.join(current_thesis_dir, "sam3.pt")
 
-    SAMPLE_RATE = 20 # Set the sample rate for frame evaluation
+    SAMPLE_RATE = 10 # Set the sample rate for frame evaluation
     
     sam3_predictor = initialize_sam3(checkpoint_path=model_checkpoint)
     run_experiment_pipeline(current_thesis_dir, sam3_predictor, sample_rate=SAMPLE_RATE)

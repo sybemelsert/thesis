@@ -255,9 +255,9 @@ if __name__ == "__main__":
             "severe": 0.1
         },
         "occlusion": {
-            "mild": 35,
-            "medium": 80,
-            "severe": 150
+            "mild": 20,
+            "medium": 40,
+            "severe": 80
         }
     }
     
