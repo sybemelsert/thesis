@@ -7,25 +7,6 @@ import random
 
 ### CORE FUNCTIONS FOR VIDEO ADJUSTMENT
 
-def apply_gaussian_blur(frame, severity:int):
-    """
-    Apply Gaussian blur to the frame using OpenCV's built-in function, with kernel size based on severity.
-    """
-    if severity == 0: return frame # If severity is 0, return the original frame without modification
-    kernel_size = severity if severity % 2 != 0 else severity + 1
-    return cv2.GaussianBlur(frame, (kernel_size, kernel_size), 0)
-
-def apply_motion_blur(frame, severity:int):
-    """
-    Apply motion blur by creating a custom kernel that simulates horizontal motion using OpenCV's filter2D function.
-    """
-    if severity == 0: return frame 
-    kernel_size = max(1, severity) # Ensure kernel size is at least 1 to avoid errors
-    kernel = np.zeros((kernel_size, kernel_size))
-    kernel[int((kernel_size - 1) / 2), :] = np.ones(kernel_size)
-    kernel /= kernel_size
-    return cv2.filter2D(frame, -1, kernel)
-
 def apply_overexposure(frame, severity:int):
     """
     Apply overexposure by adding a constant value to pixel intensities, with clipping to maintain valid range.
@@ -41,6 +22,25 @@ def apply_underexposure(frame, severity:int):
     if severity == 0: return frame
     frame_float = frame.astype(np.float32) - severity
     return np.clip(frame_float, 0, 255).astype(np.uint8)
+
+def apply_motion_blur(frame, severity:int):
+    """
+    Apply motion blur by creating a custom kernel that simulates horizontal motion using OpenCV's filter2D function.
+    """
+    if severity == 0: return frame 
+    kernel_size = max(1, severity) # Ensure kernel size is at least 1 to avoid errors
+    kernel = np.zeros((kernel_size, kernel_size))
+    kernel[int((kernel_size - 1) / 2), :] = np.ones(kernel_size)
+    kernel /= kernel_size
+    return cv2.filter2D(frame, -1, kernel)
+
+def apply_gaussian_blur(frame, severity:int):
+    """
+    Apply Gaussian blur to the frame using OpenCV's built-in function, with kernel size based on severity.
+    """
+    if severity == 0: return frame # If severity is 0, return the original frame without modification
+    kernel_size = severity if severity % 2 != 0 else severity + 1
+    return cv2.GaussianBlur(frame, (kernel_size, kernel_size), 0)
 
 def apply_grain(frame, severity:float):
     """
@@ -227,27 +227,29 @@ def run_batch_conversion(current_working_directory, experiment_configs):
 if __name__ == "__main__":
     # Get the current working directory of the script to ensure it processes files in the correct location
     current_working_directory = os.path.dirname(os.path.abspath(__file__)) 
-
+    
+    
+   
     experiment_configs = {
-        "gaussian_blur": { 
-            "mild": 9,
-            "medium": 25,
-            "severe": 55
+        "overexposure": {
+            "mild": 25,
+            "medium": 90,
+            "severe": 140
+        },
+        "underexposure": {
+            "mild": 25,
+            "medium": 90,
+            "severe": 140
         },
         "motion_blur": {
             "mild": 5,
             "medium": 20,
             "severe": 35
         },
-        "overexposure": {
-            "mild": 25,
-            "medium": 75,
-            "severe": 130
-        },
-        "underexposure": {
-            "mild": 25,
-            "medium": 90,
-            "severe": 140
+        "gaussian_blur": { 
+            "mild": 9,
+            "medium": 25,
+            "severe": 55
         },
         "grain": {
             "mild": 0.02,
@@ -255,11 +257,11 @@ if __name__ == "__main__":
             "severe": 0.1
         },
         "occlusion": {
-            "mild": 20,
-            "medium": 40,
-            "severe": 80
+            "mild": 30,
+            "medium": 60,
+            "severe": 100
         }
     }
-    
+
     # Run the converter
     run_batch_conversion(current_working_directory, experiment_configs)
