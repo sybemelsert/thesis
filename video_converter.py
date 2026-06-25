@@ -206,7 +206,7 @@ def run_batch_conversion(current_working_directory, experiment_configs):
             print(f"\n[Pair #{pairs_found}] Processing base name: {os.path.basename(base_name)}")
             
             # Select output folder for resulting videos, create one if pathname doesn't exist
-            output_folder = os.path.join(current_working_directory, "DR(eye)VE", "modified")
+            output_folder = os.path.join(current_working_directory, "DR(eye)VE", "modified_NEW")
             os.makedirs(output_folder, exist_ok=True)
             
             # Call processing function for matched pair
@@ -228,40 +228,47 @@ if __name__ == "__main__":
     # Get the current working directory of the script to ensure it processes files in the correct location
     current_working_directory = os.path.dirname(os.path.abspath(__file__)) 
     
-    
-   
+    # NEW PARAMETERS
     experiment_configs = {
-        "overexposure": {
-            "mild": 25,
-            "medium": 90,
-            "severe": 140
-        },
-        "underexposure": {
-            "mild": 25,
-            "medium": 90,
-            "severe": 140
-        },
-        "motion_blur": {
-            "mild": 5,
-            "medium": 20,
-            "severe": 35
-        },
-        "gaussian_blur": { 
-            "mild": 9,
-            "medium": 25,
-            "severe": 55
-        },
-        "grain": {
-            "mild": 0.02,
-            "medium": 0.05,
-            "severe": 0.1
-        },
-        "occlusion": {
-            "mild": 30,
-            "medium": 60,
-            "severe": 100
-        }
+    "standard": {
+        "baseline": 0
+    },
+    # Additive 8-bit offset. Capped to avoid total saturation at 'severe'.
+    "overexposure": {
+        "mild":   30,
+        "medium": 80,
+        "severe": 130
+    },
+    "underexposure": {
+        "mild":   30,
+        "medium": 80,
+        "severe": 130
+    },
+    # Horizontal motion kernel length (px). Directional, so less destructive per-px.
+    "motion_blur": {
+        "mild":   9,
+        "medium": 25,
+        "severe": 49
+    },
+    # GaussianBlur kernel size (px). sigma is auto-derived → ~1.4 / 3.5 / 6.5
+    "gaussian_blur": {
+        "mild":   7,
+        "medium": 21,
+        "severe": 41
+    },
+    # severity == Gaussian-noise std as a 0–1 fraction → ImageNet-C levels 1/3/5
+    "grain": {
+        "mild":   0.08,
+        "medium": 0.18,
+        "severe": 0.38
+    },
+    # Box side length (px). See caveat below — these are for the STATIC design.
+    "occlusion": {
+        "mild":   150,
+        "medium": 300,
+        "severe": 500
     }
+}
 
     # Run the converter
     run_batch_conversion(current_working_directory, experiment_configs)

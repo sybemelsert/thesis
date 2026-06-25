@@ -1,6 +1,7 @@
+.vscode/
 *.txt
 *.avi
 *.AVI
 *.pt
 test.py
-visualizer.py
+visualizer.py  
